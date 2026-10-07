@@ -1,0 +1,11 @@
+
+POST: http://localhost:3000/api/auth/signup
+    email, password, role, name, phone, position, department
+
+POST: http://localhost:3000/api/auth/signin
+    email, password
+
+GET: http://localhost:3000/api/auth/dash
+
+
+
