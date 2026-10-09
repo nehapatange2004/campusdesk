@@ -27,7 +27,7 @@ export const signInUser = async (req, res) => {
         const user = await User.findOne({ email: email }).select("-isActive").populate("profile");
         //match the password
         if (!user) {
-            res.status(401).send({ message: "User not found!" });
+            return res.status(401).send({ message: "User not found!" });
         }
 
         const isMatch = await comparePasswords(req.body.password, user.passwordHash);
@@ -78,49 +78,71 @@ export const signUpNewUser = async (req, res) => {
         // console.log(req.body.email);
         // console.log(req.body.password);
         const { email, password, role, name, phone, position, department } = req.body;
-        if (!email || !password || !role || !name || !phone || !position || !department) return res.status(401).json({ message: "All fields are required" });
-        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-        if (!(emailRegex.test(email))) return res.status(401).json({ message: "Invalid email" });
-
-        const user = await User.findOne({ email: req.body.email });
-        if (user) {
-            console.log("User already exists: ", user);
-            return res
-                .status(403)
-                .send({ error: "Already have an account! Consider logging in!" });
+        if (!email || !password || !role) {
+            return res.status(400).json({ message: "Email, password, and role are required." });
         }
-        const hashedPassword = await hashPassword(req.body.password);
-        
-        const newUser = new User({
-            name: req.body.name,
-            email: req.body.email,
-            passwordHash: hashedPassword,
-            role
-        });
-        await newUser.save();
 
+        const normalizedRole = role.trim().toLowerCase();
+
+        // 2. Validate Role-Specific Profile Information
+        if (normalizedRole !== "admin") {
+            if (!name || !phone || !department) {
+                return res.status(400).json({ message: "Name, phone, and department are required." });
+            }
+            if (normalizedRole !== "student" && !position) {
+                return res.status(400).json({ message: "Position is required for non-student profiles." });
+            }
+        }
+
+        // 3. Regex string formatting & syntax validations
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        if (!emailRegex.test(email.trim().toLowerCase())) {
+            return res.status(400).json({ message: "Invalid email format" });
+        }
+
+        const passwordRegex = /^(?=.*[a-zA-Z])(?=.*\d)(?=.*[^a-zA-Z0-9]).{4,}$/;
+        if (!passwordRegex.test(password.trim())) {
+            return res.status(400).json({ message: "Password must have at least one letter, one number, and one special character with NO spaces" });
+        }
+
+        // 4. Check if account already exists
+        const existingUser = await User.findOne({ email: email.trim().toLowerCase() });
+        if (existingUser) {
+            return res.status(403).json({ message: "Already have an account! Consider logging in!" });
+        }
+
+        // 5. Create core User account
+        const hashedPassword = await hashPassword(password);
+        const newUser = new User({
+            email: email.trim().toLowerCase(),
+            passwordHash: hashedPassword,
+            role: normalizedRole
+        });
+
+        // 6. Generate Profile linked to User (If not admin, populate data)
         const newUserProfile = new UserProfile({
             userId: newUser._id,
-            name,
-            phone,
-            position,
-            department,
-            
+            name: name ? name.trim() : "Admin User",
+            phone: phone ? parseInt(phone) : 0,
+            position: normalizedRole === "student" ? "student" : (position || "admin"),
+            department: department || "administration",
         });
-        await newUserProfile.save();
-        const token = generateToken(newUser._id, newUser.email);
 
-        // 2. Set the cookie on the response object
+        // Save profile & bind DB schema reference link back to the main user instance
+        await newUserProfile.save();
+        newUser.profile = newUserProfile._id;
+        await newUser.save();
+
+        // 7. Auth cookie configuration
+        const token = generateToken(newUser._id, newUser.email);
         res.cookie("token", token, {
             httpOnly: true,                 // Prevents frontend JavaScript from accessing the cookie (blocks XSS attacks)
             secure: process.env.NODE_ENV === "PROD", // Enforces HTTPS only in production environments
             sameSite: "strict",             // Protects against CSRF attacks
             maxAge: 30 * 24 * 60 * 60 * 1000 // Cookie expiration time in milliseconds (e.g., 30 days)
-        });
+        }
+        );
 
-        console.log("Account Created successfully and cookie token set!");
-
-        // 3. Construct the response object and send it
         const responseData = {
             ...newUser.toJSON(),
             token,

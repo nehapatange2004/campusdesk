@@ -53,7 +53,8 @@ const UserProfileSchema = new mongoose.Schema(
                 "vice-principal",
                 "director",
                 "administrative_officer",
-                "other"
+                "other",
+                "admin"
             ]
         },
 
